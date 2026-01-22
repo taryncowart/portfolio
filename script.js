@@ -28,7 +28,7 @@ if (hero) {
     hero.style.transform = 'translateY(0)';
 }
 
-// Animation Section - Cursor-based image replacement
+// Animation Section - Cursor-based image replacement (desktop) or gyroscope-based (mobile)
 const animationImage = document.getElementById('animation-image');
 const animationVideo = document.getElementById('animation-video');
 
@@ -40,6 +40,17 @@ if (animationImage && animationVideo) {
     let lastTime = Date.now();
     let velocity = 0;
     let currentMediaIndex = 0;
+    
+    // Mobile device detection
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                     (window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
+    
+    // Mobile gyroscope variables
+    let lastBeta = null;
+    let lastGamma = null;
+    let lastOrientationTime = Date.now();
+    let angularVelocity = 0;
+    let accumulatedRotation = 0;
     
     // Helper function to get file extension
     function getFileExtension(filename) {
@@ -74,55 +85,121 @@ if (animationImage && animationVideo) {
     // Initialize with first media file
     updateMedia(mediaFiles[0]);
     
-    // Track cursor position and velocity anywhere in viewport
-    document.addEventListener('mousemove', (e) => {
-        const x = e.clientX;
-        const y = e.clientY;
-        const currentTime = Date.now();
-        const timeDelta = currentTime - lastTime;
+    // Desktop: Track cursor position and velocity anywhere in viewport
+    if (!isMobile) {
+        document.addEventListener('mousemove', (e) => {
+            const x = e.clientX;
+            const y = e.clientY;
+            const currentTime = Date.now();
+            const timeDelta = currentTime - lastTime;
+            
+            // Calculate velocity (distance moved per time)
+            if (timeDelta > 0 && lastX !== 0 && lastY !== 0) {
+                const distance = Math.sqrt(
+                    Math.pow(x - lastX, 2) + Math.pow(y - lastY, 2)
+                );
+                velocity = distance / timeDelta; // pixels per millisecond
+            }
+            
+            // Map cursor X position to media index (divide viewport into more sections for frequent changes)
+            const viewportWidth = window.innerWidth;
+            const normalizedX = x / viewportWidth;
+            // Create sections for frequent changes
+            const sections = mediaFiles.length * 3;
+            const newMediaIndex = Math.floor(normalizedX * sections) % mediaFiles.length;
+            const clampedIndex = Math.max(0, Math.min(mediaFiles.length - 1, newMediaIndex));
+            
+            // Update media if index changed
+            if (clampedIndex !== currentMediaIndex) {
+                currentMediaIndex = clampedIndex;
+                updateMedia(mediaFiles[currentMediaIndex]);
+            }
+            
+            // Adjust transition speed based on velocity
+            // Higher velocity = faster transition (lower duration)
+            // Clamp velocity to reasonable range (0.1 to 2 pixels per ms)
+            const normalizedVelocity = Math.max(0.1, Math.min(2, velocity));
+            // Invert so higher velocity = lower duration (faster)
+            const transitionDuration = Math.max(50, 200 - (normalizedVelocity * 75));
+            const activeElement = animationImage.classList.contains('active') ? animationImage : animationVideo;
+            activeElement.style.transition = `opacity ${transitionDuration}ms ease`;
+            
+            lastX = x;
+            lastY = y;
+            lastTime = currentTime;
+        });
         
-        // Calculate velocity (distance moved per time)
-        if (timeDelta > 0 && lastX !== 0 && lastY !== 0) {
-            const distance = Math.sqrt(
-                Math.pow(x - lastX, 2) + Math.pow(y - lastY, 2)
-            );
-            velocity = distance / timeDelta; // pixels per millisecond
-        }
-        
-        // Map cursor X position to media index (divide viewport into more sections for frequent changes)
-        const viewportWidth = window.innerWidth;
-        const normalizedX = x / viewportWidth;
-        // Create 9 sections (3 files × 3 cycles) for more frequent changes
-        const sections = mediaFiles.length * 3;
-        const newMediaIndex = Math.floor(normalizedX * sections) % mediaFiles.length;
-        const clampedIndex = Math.max(0, Math.min(mediaFiles.length - 1, newMediaIndex));
-        
-        // Update media if index changed
-        if (clampedIndex !== currentMediaIndex) {
-            currentMediaIndex = clampedIndex;
-            updateMedia(mediaFiles[currentMediaIndex]);
-        }
-        
-        // Adjust transition speed based on velocity
-        // Higher velocity = faster transition (lower duration)
-        // Clamp velocity to reasonable range (0.1 to 2 pixels per ms)
-        const normalizedVelocity = Math.max(0.1, Math.min(2, velocity));
-        // Invert so higher velocity = lower duration (faster)
-        const transitionDuration = Math.max(50, 200 - (normalizedVelocity * 75));
-        const activeElement = animationImage.classList.contains('active') ? animationImage : animationVideo;
-        activeElement.style.transition = `opacity ${transitionDuration}ms ease`;
-        
-        lastX = x;
-        lastY = y;
-        lastTime = currentTime;
-    });
+        // Reset velocity when mouse leaves viewport
+        document.addEventListener('mouseleave', () => {
+            velocity = 0;
+            lastX = 0;
+            lastY = 0;
+        });
+    }
     
-    // Reset velocity when mouse leaves viewport
-    document.addEventListener('mouseleave', () => {
-        velocity = 0;
-        lastX = 0;
-        lastY = 0;
-    });
+    // Mobile: Track device orientation and angular velocity
+    if (isMobile) {
+        // Request permission for iOS 13+ devices
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            DeviceOrientationEvent.requestPermission()
+                .then(response => {
+                    if (response === 'granted') {
+                        window.addEventListener('deviceorientation', handleDeviceOrientation);
+                    }
+                })
+                .catch(console.error);
+        } else {
+            // For Android and older iOS devices
+            window.addEventListener('deviceorientation', handleDeviceOrientation);
+        }
+        
+        function handleDeviceOrientation(event) {
+            const beta = event.beta;  // Front-to-back tilt (-180 to 180)
+            const gamma = event.gamma; // Left-to-right tilt (-90 to 90)
+            const currentTime = Date.now();
+            const timeDelta = currentTime - lastOrientationTime;
+            
+            if (lastBeta !== null && lastGamma !== null && timeDelta > 0) {
+                // Calculate angular velocity from rotation change
+                const betaDelta = Math.abs(beta - lastBeta);
+                const gammaDelta = Math.abs(gamma - lastGamma);
+                const totalRotation = Math.sqrt(betaDelta * betaDelta + gammaDelta * gammaDelta);
+                
+                // Angular velocity in degrees per millisecond
+                angularVelocity = totalRotation / timeDelta;
+                
+                // Accumulate rotation to determine media index
+                // Use gamma (left-right tilt) as primary control
+                // Normalize gamma from -90 to 90, then map to 0-1
+                const normalizedGamma = (gamma + 90) / 180;
+                const clampedGamma = Math.max(0, Math.min(1, normalizedGamma));
+                
+                // Map to media index with multiple cycles for smoother transitions
+                const sections = mediaFiles.length * 3;
+                const newMediaIndex = Math.floor(clampedGamma * sections) % mediaFiles.length;
+                const clampedIndex = Math.max(0, Math.min(mediaFiles.length - 1, newMediaIndex));
+                
+                // Update media if index changed
+                if (clampedIndex !== currentMediaIndex) {
+                    currentMediaIndex = clampedIndex;
+                    updateMedia(mediaFiles[currentMediaIndex]);
+                }
+                
+                // Adjust transition speed based on angular velocity
+                // Higher angular velocity = faster transition
+                // Clamp angular velocity to reasonable range (0.01 to 0.5 degrees per ms)
+                const normalizedAngularVelocity = Math.max(0.01, Math.min(0.5, angularVelocity));
+                // Invert so higher velocity = lower duration (faster)
+                const transitionDuration = Math.max(50, 200 - (normalizedAngularVelocity * 300));
+                const activeElement = animationImage.classList.contains('active') ? animationImage : animationVideo;
+                activeElement.style.transition = `opacity ${transitionDuration}ms ease`;
+            }
+            
+            lastBeta = beta;
+            lastGamma = gamma;
+            lastOrientationTime = currentTime;
+        }
+    }
 }
 
 // Projects Section - Hover to show media at cursor
