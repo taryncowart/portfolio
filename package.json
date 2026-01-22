@@ -1,0 +1,20 @@
+{
+  "name": "portfolio",
+  "version": "1.0.0",
+  "description": "Taryn Cowart's portfolio website",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve .",
+    "dev": "npx serve . -l 3000",
+    "preview": "npx serve . -l 3000"
+  },
+  "keywords": [
+    "portfolio",
+    "website",
+    "design"
+  ],
+  "author": "Taryn Cowart",
+  "license": "MIT",
+  "devDependencies": {},
+  "dependencies": {}
+}
